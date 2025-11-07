@@ -59,11 +59,11 @@ class VoiceAssistantPipeline:
         print("="*60 + "\n")
         
         return {
-            "input_text": input_text,
-            "response_text": response_text,
-            "output_audio": output_audio_path,
-            "processing_time": processing_time,
-            "emotion_details": emotion_details
+            "input_text": input_text,                  # Đoạn văn bản đầu vào từ STT
+            "response_text": response_text,            # Đoạn văn bản phản hồi từ LLM   
+            "output_audio": output_audio_path,         # Đường dẫn file âm thanh đầu ra từ TTS
+            "processing_time": processing_time,        # Thời gian xử lý tổng cộng
+            "emotion_details": emotion_details         # Chi tiết phân tích cảm xúc
         }
 
 # === [PHẦN ĐÃ SỬA] Thêm điểm khởi đầu để chạy file độc lập ===

@@ -101,27 +101,44 @@ async def websocket_endpoint(websocket: WebSocket):
                 if is_speaking:
                     silence_counter += 1
                     speech_buffer.append(data)
+                    # Nếu không còn tiếng nói, kết thúc ghi âm
                     if silence_counter >= VAD_SILENCE_FRAMES_END:
                         print("==> Silence detected. End of utterance.")
+                        # Xử lý đoạn âm thanh đã ghi
                         is_processing = True
+                        # Gửi tín hiệu bắt đầu xử lý
                         await websocket.send_text("PROCESSING_START")
+                        # Gộp toàn bộ dữ liệu âm thanh
                         full_audio_data = b"".join(speech_buffer)
                         input_audio_path = save_audio_to_wav(full_audio_data)
                         if input_audio_path:
                             try:
+                                # Chạy pipeline
                                 result = pipeline.process(audio_input_path=input_audio_path)
+                                # Lấy đường dẫn file âm thanh đầu ra
                                 output_audio_path = result.get("output_audio")
+                                output_emotion = result.get("emotion_details")
+                                # Gửi thông tin phân tích cảm xúc về client
+                                if output_emotion:
+                                    print (f"Sending emotion details: {output_emotion}")
+                                    await websocket.send_json({"emotion_details": int(output_emotion.get("emotion", 0))})
+                                
+                                # Check và gửi file âm thanh đầu ra từng phần
                                 if output_audio_path and os.path.exists(output_audio_path):
                                     with open(output_audio_path, 'rb') as audio_file:
                                         while True:
                                             chunk = audio_file.read(AUDIO_CHUNK_SIZE)
                                             if not chunk: break
                                             await websocket.send_bytes(chunk)
+                                # Nếu không tìm thấy file âm thanh đầu ra
+                                # Gửi thông báo lỗi
                                 else:
                                     print("Pipeline did not return a valid audio output path.")
+                            # Bắt lỗi chung
                             except Exception as e:
                                 print(f"An error occurred during pipeline processing: {e}")
                             finally:
+                                # Gửi tín hiệu kết thúc TTS
                                 await websocket.send_text("TTS_END")
                                 print("Finished streaming response.")
                         is_speaking = False
