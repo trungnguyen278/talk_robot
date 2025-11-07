@@ -37,7 +37,7 @@ const char* websocket_server_path = "/ws";
 #define TFT_CS   5
 #define TFT_DC   2
 #define TFT_RST  4     
-#define TFT_BL   -1    // vì bạn nối BL trực tiếp 3.3V nên không cần điều khiển
+#define TFT_BL   -1    // No pin connected
 
 // --- Cấu hình Âm thanh & Animation ---
 #define SPEAKER_GAIN            8.0f
@@ -51,7 +51,7 @@ const char* websocket_server_path = "/ws";
 // --- Biến cho WebSocket & Âm thanh ---
 using namespace websockets;
 WebsocketsClient client;
-enum State { STATE_STREAMING, STATE_WAITING, STATE_PLAYING_RESPONSE };
+enum State { STATE_STREAMING, STATE_WAITING, STATE_PLAYING_RESPONSE, STATE_SLEEPING };
 volatile State currentState = STATE_STREAMING;
 byte i2s_read_buffer[I2S_READ_CHUNK_SIZE];
 byte playback_buffer[PLAYBACK_BUFFER_SIZE];
@@ -65,22 +65,18 @@ typedef struct _VideoInfo {
   uint16_t num_frames;
 } VideoInfo;
 
-//#include "video01.h" // IDLE / LISTENING
-//#include "video05.h" // PROCESSING
-
-#include "emoji\video00.h"
-#include "emoji\video01.h"
-#include "emoji\video02.h"
-#include "emoji\video03.h"
-
-#define EMOTION_NEUTRAL      0
-#define EMOTION_HAPPY        1
-#define EMOTION_SAD          2
-#define EMOTION_STUNNED      3
-
-VideoInfo* videoList[] = { &video00, &video01, &video02, &video03 };
- 
+// Include emotion definitions and video list
+#include "..\..\include\emotion.h"
+// Declare emotionList as extern
+extern VideoInfo* emotionList[];
+// Declare animationList as extern
+extern VideoInfo* animationList[];
+// emotion variable to track current emotion state
 volatile uint8_t emotion = EMOTION_NEUTRAL;
+// Working flag
+volatile bool working = true;
+// Working timer handle
+TimerHandle_t working_timer = NULL;
 
 // ===============================================================
 // 3. CÁC HÀM CHO MÀN HÌNH (ANIMATION)
@@ -92,25 +88,52 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
   return true;
 }
 
+// Callback to reset working flag
+void working_timer_callback(TimerHandle_t xTimer) {
+  // Reset working flag when timer expires
+  if (xTimer != NULL && working && emotion != EMOTION_STUNNED) {
+    working = false;
+  }
+}
+
 
 // Task to handle display animation
 void display_task(void *pvParameters) {
   uint16_t current_frame = 0;
   uint8_t current_emotion = EMOTION_NEUTRAL;
+  uint8_t current_animation = 0;
   while(true) {
-    // Read the current emotion safely
-    current_emotion = emotion;
+    // Check if working display emotion
+    if (working) {
+      // Read the current emotion safely
+      current_emotion = emotion;
 
-    // Check frame bounds
-    if (current_frame >= videoList[current_emotion]->num_frames) {
-      current_frame = 0;
-    }
-    // Get JPEG data for the current frame
-    const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&videoList[current_emotion]->frames[current_frame]);
-    // Get size of the current frame
-    uint16_t jpg_size = pgm_read_word(&videoList[current_emotion]->frames_size[current_frame]);
-    // Draw the JPEG image
-    TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
+      // Check frame bounds
+      if (current_frame >= emotionList[current_emotion]->num_frames) {
+        current_frame = 0;
+      }
+      // Get JPEG data for the current frame
+      const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&emotionList[current_emotion]->frames[current_frame]);
+      // Get size of the current frame
+      uint16_t jpg_size = pgm_read_word(&emotionList[current_emotion]->frames_size[current_frame]);
+      // Draw the JPEG image
+      TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
+    } 
+    // If not working, show random animations
+    else {
+      // Check frame bounds for animation. If exceeded, reset and pick new animation
+      if(current_frame >= animationList[current_animation]->num_frames) {
+        current_frame = 0;
+        current_animation = random(0, sizeof(animationList) / sizeof(animationList[0]));
+      }
+      // Get JPEG data for the current animation frame
+      const uint8_t* jpg_data = (const uint8_t*)pgm_read_ptr(&animationList[current_animation]->frames[current_frame]);
+      // Get size of the current animation frame
+      uint16_t jpg_size = pgm_read_word(&animationList[current_animation]->frames_size[current_frame]);
+      // Draw the JPEG image
+      TJpgDec.drawJpg(0, 0, jpg_data, jpg_size);
+
+    } 
     // Move to next frame
     ++current_frame;
     // Delay for the next frame
@@ -192,20 +215,41 @@ void onWebsocketMessage(WebsocketsMessage message) {
       
         String text_msg = String(message.c_str());
         Serial.printf("Server sent text: %s\n", text_msg.c_str());
+        
         if (text_msg == "PROCESSING_START") {
             Serial.println("Server is processing. Pausing mic.");
             currentState = STATE_WAITING;
             //current_video_index = 1;
-        } else if (text_msg == "TTS_END") {
+        } 
+        else if (text_msg == "TTS_END") {
             Serial.println("End of TTS. Returning to streaming mode.");
             if (playback_buffer_fill > 0) {
                 size_t bytes_written = 0;
+                
                 i2s_write(I2S_SPEAKER_PORT, playback_buffer, playback_buffer_fill, &bytes_written, portMAX_DELAY);
                 playback_buffer_fill = 0;
             }
             currentState = STATE_STREAMING;
+            emotion = EMOTION_NEUTRAL;
             //current_video_index = 0;
+            if (working_timer != NULL) {
+                xTimerStop(working_timer, 0);
+            }
+        }     
+        else {
+            // Assume any other text message is emotion details
+            Serial.println("Received emotion details from server.");
+            if (text_msg == "00") {
+                emotion = EMOTION_NEUTRAL;
+            } else if (text_msg == "01") {
+                emotion = EMOTION_HAPPY;
+            } else if (text_msg == "10") {
+                emotion = EMOTION_SAD;
+            } else {
+                Serial.println("Unknown emotion code received.");
+            }
         }
+
     // --- Handling Binary Audio Data ---
     } else if (message.isBinary()) {
         if (currentState != STATE_PLAYING_RESPONSE) {
@@ -239,7 +283,9 @@ void onWebsocketMessage(WebsocketsMessage message) {
 void audio_processing_task(void *pvParameters) {
   size_t bytes_read;
   while (true) {
+    // Only read and send audio when in streaming state
     if (currentState == STATE_STREAMING) {
+        // Read audio data from I2S microphone
         i2s_read(I2S_MIC_PORT, i2s_read_buffer, I2S_READ_CHUNK_SIZE, &bytes_read, portMAX_DELAY);
         if (bytes_read == I2S_READ_CHUNK_SIZE && client.available()) {
             client.sendBinary((const char*)i2s_read_buffer, bytes_read);
@@ -264,7 +310,7 @@ void setup() {
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE);
   tft.setTextSize(2);
-  tft.drawString("Connecting to WiFi...", 15, 100);
+  tft.drawString("Connecting to WiFi", 15, 100);
 
   // ==================== MODIFIED: WiFiManager Setup ====================
   WiFiManager wm;
@@ -316,6 +362,9 @@ void setup() {
   xTaskCreatePinnedToCore(audio_processing_task, "Audio Task", 4096, NULL, 10, NULL, 1);
   xTaskCreatePinnedToCore(display_task, "Display Task", 4096, NULL, 5, NULL, 0);
 
+  // Create the working timer
+  working_timer = xTimerCreate("Working Timer", pdMS_TO_TICKS(10000), pdFALSE, (void*)0, working_timer_callback);
+
   Serial.println("==============================================");
   Serial.println(" Voice Assistant Client with Mochi UI Ready");
   Serial.println("==============================================");
@@ -327,6 +376,7 @@ void loop() {
   if (!client.available() && currentState != STATE_PLAYING_RESPONSE && currentState != STATE_WAITING) {
     // If disconnected, set emotion to STUNNED
     emotion = EMOTION_STUNNED;
+    working = true;
     // Reset current video index if not playing or waiting
     Serial.println("WebSocket disconnected. Reconnecting...");
     // Attempt to reconnect to the configured server IP
