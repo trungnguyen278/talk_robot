@@ -15,7 +15,7 @@
 #include "..\resource\emoji_h\nheomat.h"
 #include "..\resource\emoji_h\duamat.h"
 #include "..\resource\emoji_h\doxet.h"
-#include "..\resource\emoji_h\1macdinh.h"
+#include "..\resource\emoji_h\macdinh.h"
 
 #define EMOTION_NEUTRAL      0       // Bình thường
 #define EMOTION_HAPPY        1       // Vui vẻ
@@ -26,7 +26,7 @@
 VideoInfo* emotionList[] = { &binhthuong, &vuive, &buon, &hoamat };
 
 // List of animations for free roaming
-VideoInfo* animationList[] = { &buonngu, &nhaymat, &suynghi2, &ngacnhien2 , &nheomat, &duamat, &doxet, &1macdinh };
+VideoInfo* animationList[] = { &buonngu, &nhaymat, &suynghi2, &ngacnhien2 , &nheomat, &duamat, &doxet, &macdinh };
 
 
 #endif // EMOTION_H
