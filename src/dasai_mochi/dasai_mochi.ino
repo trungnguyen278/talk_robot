@@ -91,6 +91,7 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
 // Callback to reset working flag
 void working_timer_callback(TimerHandle_t xTimer) {
   // Reset working flag when timer expires
+  Serial.println("Working timer expired");
   if (xTimer != NULL && working && emotion != EMOTION_STUNNED) {
     working = false;
   }
@@ -363,7 +364,15 @@ void setup() {
   xTaskCreatePinnedToCore(display_task, "Display Task", 4096, NULL, 5, NULL, 0);
 
   // Create the working timer
-  working_timer = xTimerCreate("Working Timer", pdMS_TO_TICKS(10000), pdFALSE, (void*)0, working_timer_callback);
+  working_timer = xTimerCreate("Working Timer", pdMS_TO_TICKS(10000), pdTRUE, (void*)0, working_timer_callback);
+  xTimerStart(working_timer, 0);
+
+  if (working_timer == NULL) {
+    Serial.println("Failed to create working timer.");
+  } else {
+    Serial.println("Working timer created.");
+    xTimerStart(working_timer, 0);
+  }
 
   Serial.println("==============================================");
   Serial.println(" Voice Assistant Client with Mochi UI Ready");
