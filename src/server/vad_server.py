@@ -121,7 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 # Gửi thông tin phân tích cảm xúc về client
                                 if output_emotion:
                                     print (f"Sending emotion details: {output_emotion}")
-                                    await websocket.send_json({"emotion_details": int(output_emotion.get("emotion", 0))})
+                                    await websocket.send_text(f"{output_emotion}")
                                 
                                 # Check và gửi file âm thanh đầu ra từng phần
                                 if output_audio_path and os.path.exists(output_audio_path):
