@@ -11,7 +11,7 @@
 
 // --- Cấu hình Mạng & WebSocket ---
 // MODIFIED: Changed to a mutable char array to hold the IP from WiFiManager
-char websocket_server_host[40] = "192.168.0.165"; // Default IP
+char websocket_server_host[40] = "192.168.50.115"; // Default IP
 const uint16_t websocket_server_port = 8000;
 const char* websocket_server_path = "/ws";
 
@@ -51,7 +51,7 @@ const char* websocket_server_path = "/ws";
 // --- Biến cho WebSocket & Âm thanh ---
 using namespace websockets;
 WebsocketsClient client;
-enum State { STATE_STREAMING, STATE_WAITING, STATE_PLAYING_RESPONSE, STATE_SLEEPING };
+enum State { STATE_STREAMING, STATE_WAITING, STATE_PLAYING_RESPONSE };
 volatile State currentState = STATE_STREAMING;
 byte i2s_read_buffer[I2S_READ_CHUNK_SIZE];
 byte playback_buffer[PLAYBACK_BUFFER_SIZE];
@@ -92,10 +92,11 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
 void working_timer_callback(TimerHandle_t xTimer) {
   // Reset working flag when timer expires
   Serial.println("Working timer expired");
-  if (xTimer != NULL && working && emotion != EMOTION_STUNNED) {
+  if (xTimer != NULL && emotion != EMOTION_STUNNED && currentState == STATE_STREAMING) {
     working = false;
   }
 }
+
 
 
 // Task to handle display animation
@@ -232,9 +233,9 @@ void onWebsocketMessage(WebsocketsMessage message) {
             }
             currentState = STATE_STREAMING;
             emotion = EMOTION_NEUTRAL;
-            //current_video_index = 0;
+            // Restart working timer
             if (working_timer != NULL) {
-                xTimerStop(working_timer, 0);
+                xTimerStart(working_timer, 0);
             }
         }     
         else {
@@ -249,6 +250,7 @@ void onWebsocketMessage(WebsocketsMessage message) {
             } else {
                 Serial.println("Unknown emotion code received.");
             }
+            working = true;
         }
 
     // --- Handling Binary Audio Data ---
@@ -364,7 +366,7 @@ void setup() {
   xTaskCreatePinnedToCore(display_task, "Display Task", 4096, NULL, 5, NULL, 0);
 
   // Create the working timer
-  working_timer = xTimerCreate("Working Timer", pdMS_TO_TICKS(10000), pdTRUE, (void*)0, working_timer_callback);
+  working_timer = xTimerCreate("Working Timer", pdMS_TO_TICKS(10000), pdFALSE, (void*)0, working_timer_callback);
   xTimerStart(working_timer, 0);
 
   if (working_timer == NULL) {
@@ -397,6 +399,10 @@ void loop() {
     else {
       Serial.println("Reconnected to WebSocket server.");
       emotion = EMOTION_NEUTRAL;
+      // Restart working timer
+      if (working_timer != NULL) {
+        xTimerStart(working_timer, 0);
+      }
     }
 
   }
