@@ -11,7 +11,7 @@
 #include "..\resource\emoji_h\buonngu.h"
 #include "..\resource\emoji_h\nhaymat.h"
 #include "..\resource\emoji_h\suynghi2.h"
-#include "..\resource\emoji_h\ngacnhien.h"
+#include "..\resource\emoji_h\ngacnhien2.h"
 
 #define EMOTION_NEUTRAL      0       // Bình thường
 #define EMOTION_HAPPY        1       // Vui vẻ
