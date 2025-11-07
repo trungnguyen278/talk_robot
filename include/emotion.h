@@ -22,7 +22,7 @@
 VideoInfo* emotionList[] = { &binhthuong, &vuive, &buon, &hoamat };
 
 // List of animations for free roaming
-VideoInfo* animationList[] = { &buonngu, &nhaymat, &suynghi2, &ngacnhien };
+VideoInfo* animationList[] = { &buonngu, &nhaymat, &suynghi2, &ngacnhien2 };
 
 
 #endif // EMOTION_H
