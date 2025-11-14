@@ -3,6 +3,8 @@
 
 #include <TJpg_Decoder.h>
 
+#include "..\resource\ptit.h"
+
 #include "..\resource\emoji_h\binhthuong.h"
 #include "..\resource\emoji_h\vuive.h"
 #include "..\resource\emoji_h\buon.h"
@@ -20,13 +22,20 @@
 #define EMOTION_NEUTRAL      0       // Bình thường
 #define EMOTION_HAPPY        1       // Vui vẻ
 #define EMOTION_SAD          2       // Buồn
-#define EMOTION_STUNNED      3       // Hóa đá
+
+
+// logo
+VideoInfo* logoPTIT = &ptit;
 
 // List of emotions
-VideoInfo* emotionList[] = { &binhthuong, &vuive, &buon, &hoamat };
+VideoInfo* emotionList[] = { &binhthuong, &vuive, &buon };
+
+// Stunned emotion
+VideoInfo* stunnedEmotion = &hoamat;
 
 // List of animations for free roaming
 VideoInfo* animationList[] = { &buonngu, &nhaymat, &suynghi2, &ngacnhien2 , &nheomat, &duamat, &doxet, &macdinh };
+
 
 
 #endif // EMOTION_H

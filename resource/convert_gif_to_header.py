@@ -9,7 +9,7 @@ PATH_INPUT = "emoji_gif"          # Thư mục chứa file GIF
 PATH_OUTPUT = "emoji_h"           # Thư mục xuất file .h
 MAX_FRAMES = 80                   # Giới hạn số frame (tránh đầy flash)
 JPEG_QUALITY = 80                 # Chất lượng JPG (0-100)
-RESIZE = None                     # (160,128) hoặc None
+RESIZE = None                  # (160,128) hoặc None
 # =========================
 
 
