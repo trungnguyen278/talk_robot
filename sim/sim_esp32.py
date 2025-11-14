@@ -30,6 +30,10 @@ server_log_file.setnchannels(1)
 server_log_file.setsampwidth(2)
 server_log_file.setframerate(SAMPLE_RATE)
 
+# Output stream để phát audio liên tục
+output_stream = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16")
+output_stream.start()
+
 async def sender(ws):
     global current_state
     with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
@@ -54,7 +58,8 @@ async def receiver(ws):
                 current_state = STATE_PLAYING
             server_log_file.writeframes(message)  # ghi log server audio
             arr = np.frombuffer(message, dtype=np.int16)
-            sd.play(arr, SAMPLE_RATE)
+            # Ghi liên tục vào loa
+            output_stream.write(arr)
         else:
             # Nhận text control
             print(f"📩 Server text: {message}")
@@ -69,9 +74,16 @@ async def receiver(ws):
                 print(f"😊 Emotion từ server: {emo}")
 
 async def main():
-    async with websockets.connect(WS_URL, max_size=None) as ws:
-        print("✅ Connected to server")
-        await asyncio.gather(sender(ws), receiver(ws))
+    try:
+        print(f"🔌 Trying to connect to {WS_URL} ...")
+        async with websockets.connect(WS_URL, max_size=None) as ws:
+            print("✅ Connected to server")
+            await asyncio.gather(sender(ws), receiver(ws))
+    except Exception as e:
+        # Log lỗi kết nối
+        print(f"❌ Cannot connect to server {WS_URL}")
+        print(f"📄 Exception type: {type(e).__name__}")
+        print(f"📄 Exception detail: {e}")
 
 if __name__ == "__main__":
     try:
@@ -79,4 +91,7 @@ if __name__ == "__main__":
     finally:
         mic_log_file.close()
         server_log_file.close()
+        output_stream.stop()
+        output_stream.close()
         print("📁 Log WAV files saved.")
+# sim/sim_esp32.py
