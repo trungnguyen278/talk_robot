@@ -1,0 +1,8 @@
+Change Component Designator: OldDesignator=BOOT1 NewDesignator=BOOT
+Change Component Designator: OldDesignator=EN1 NewDesignator=EN
+Change Component Designator: OldDesignator=JP1 NewDesignator=GND D+ D- V
+Change Component Designator: OldDesignator=JP2 NewDesignator=congtac
+Change Component Designator: OldDesignator=JP3 NewDesignator=-  +
+Change Component Designator: OldDesignator=JP4 NewDesignator=GND speaker
+Change Component Designator: OldDesignator=JP5 NewDesignator=N   P
+Change Component Designator: OldDesignator=JP6 NewDesignator=SPI    3.3V GND

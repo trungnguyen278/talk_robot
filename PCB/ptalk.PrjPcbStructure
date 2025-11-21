@@ -1,0 +1,5 @@
+Record=TopLevelDocument|FileName=Battery.SchDoc|SheetNumber=1
+Record=NoMainPathDocument|SourceDocument=Battery.SchDoc|FileName=Downloader.SchDoc|SheetNumber=3
+Record=NoMainPathDocument|SourceDocument=Battery.SchDoc|FileName=Esp32.SchDoc|SheetNumber=5
+Record=NoMainPathDocument|SourceDocument=Battery.SchDoc|FileName=Media.SchDoc|SheetNumber=4
+Record=NoMainPathDocument|SourceDocument=Battery.SchDoc|FileName=Source.SchDoc|SheetNumber=2
