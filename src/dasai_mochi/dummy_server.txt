@@ -1,0 +1,286 @@
+import asyncio
+import random
+import wave
+import os
+import struct
+from datetime import datetime
+
+from fastapi import FastAPI, WebSocket
+import uvicorn
+
+app = FastAPI()
+
+# ================= CONFIG =================
+EMOTIONS = ["00", "01", "10"]
+
+CHUNK_BYTES = 512              # khớp với ESP32
+INPUT_FOLDER = "input"
+OUTPUT_FOLDER = "output"
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+RECV_MIC_SECONDS = 10.0        # thời gian thu mic (giây)
+
+# tốc độ tự nhiên của ADPCM ~ 8000 bytes/s (16kHz, 16-bit, mono, nén 4:1)
+REAL_CHUNK_DELAY = CHUNK_BYTES / 8000.0  # ≈ 0.064s
+
+
+# ================= ADPCM TABLES =================
+step_table = [
+    7, 8, 9, 10, 11, 12, 13, 14,
+    16, 17, 19, 21, 23, 25, 28, 31,
+    34, 37, 41, 45, 50, 55, 60, 66,
+    73, 80, 88, 97, 107, 118, 130, 143,
+    157, 173, 190, 209, 230, 253, 279, 307,
+    337, 371, 408, 449, 494, 544, 598, 658,
+    724, 796, 876, 963, 1060, 1166, 1282, 1411,
+    1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024,
+    3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484,
+    7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
+    15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
+    32767
+]
+
+index_table = [
+    -1, -1, -1, -1, 2, 4, 6, 8,
+    -1, -1, -1, -1, 2, 4, 6, 8
+]
+
+
+# ================= ADPCM ENCODER (server -> ESP) =================
+class ADPCMEncoder:
+    def __init__(self):
+        self.predictor = 0
+        self.step_index = 0
+        self.high_nibble = True
+        self.nibble = 0
+        self.out_bytes = bytearray()
+
+    def encode_sample(self, sample: int):
+        step = step_table[self.step_index]
+        diff = sample - self.predictor
+        code = 0
+
+        if diff < 0:
+            code |= 8
+            diff = -diff
+
+        if diff >= step:
+            code |= 4
+            diff -= step
+        if diff >= step // 2:
+            code |= 2
+            diff -= step // 2
+        if diff >= step // 4:
+            code |= 1
+
+        delta = step >> 3
+        if code & 4:
+            delta += step
+        if code & 2:
+            delta += step >> 1
+        if code & 1:
+            delta += step >> 2
+
+        if code & 8:
+            self.predictor -= delta
+        else:
+            self.predictor += delta
+
+        # clamp
+        if self.predictor > 32767:
+            self.predictor = 32767
+        elif self.predictor < -32768:
+            self.predictor = -32768
+
+        self.step_index += index_table[code]
+        if self.step_index < 0:
+            self.step_index = 0
+        elif self.step_index > 88:
+            self.step_index = 88
+
+        # pack 2 nibble / byte
+        if self.high_nibble:
+            self.nibble = code & 0x0F
+            self.high_nibble = False
+        else:
+            self.out_bytes.append(self.nibble | ((code & 0x0F) << 4))
+            self.high_nibble = True
+
+    def encode_block(self, pcm_samples):
+        self.out_bytes = bytearray()
+        self.high_nibble = True
+        for s in pcm_samples:
+            self.encode_sample(s)
+        if not self.high_nibble:
+            self.out_bytes.append(self.nibble)  # flush odd nibble
+        return bytes(self.out_bytes)
+
+
+# ================= ADPCM DECODER (ESP -> server) =================
+class ADPCMDecoder:
+    def __init__(self):
+        self.predictor = 0
+        self.step_index = 0
+
+    def decode(self, adpcm_bytes: bytes):
+        pcm_out = []
+        predictor = self.predictor
+        index = self.step_index
+
+        for b in adpcm_bytes:
+            # low nibble, high nibble
+            for shift in (0, 4):
+                code = (b >> shift) & 0x0F
+                step = step_table[index]
+
+                diffq = step >> 3
+                if code & 4:
+                    diffq += step
+                if code & 2:
+                    diffq += step >> 1
+                if code & 1:
+                    diffq += step >> 2
+
+                if code & 8:
+                    predictor -= diffq
+                else:
+                    predictor += diffq
+
+                if predictor > 32767:
+                    predictor = 32767
+                elif predictor < -32768:
+                    predictor = -32768
+
+                index += index_table[code]
+                if index < 0:
+                    index = 0
+                elif index > 88:
+                    index = 88
+
+                pcm_out.append(predictor)
+
+        self.predictor = predictor
+        self.step_index = index
+        return pcm_out
+
+
+# ================= WebSocket Endpoint =================
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("Client connected")
+
+    try:
+        while True:
+            loop = asyncio.get_event_loop()
+
+            # 1️⃣ THU MIC ~10 GIÂY TRƯỚC KHI PHẢN HỒI
+            print("=== BAT DAU THU MIC ({}s) ===".format(RECV_MIC_SECONDS))
+            decoder = ADPCMDecoder()
+            recorded_pcm = []
+
+            start_time = loop.time()
+            while loop.time() - start_time < RECV_MIC_SECONDS:
+                try:
+                    msg = await asyncio.wait_for(websocket.receive(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    continue
+
+                if msg["type"] == "websocket.disconnect":
+                    print("Client disconnected while recording mic")
+                    return
+
+                if msg["type"] == "websocket.receive":
+                    data_bytes = msg.get("bytes", None)
+                    if data_bytes:
+                        # data_bytes là ADPCM do ESP gửi lên
+                        pcm_chunk = decoder.decode(data_bytes)
+                        recorded_pcm.extend(pcm_chunk)
+
+            # Lưu WAV vào thư mục output
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            out_path = os.path.join(OUTPUT_FOLDER, f"mic_{timestamp}.wav")
+
+            with wave.open(out_path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)       # 16-bit
+                wf.setframerate(16000)   # 16kHz
+                if recorded_pcm:
+                    pcm_bytes = struct.pack("<{}h".format(len(recorded_pcm)), *recorded_pcm)
+                else:
+                    pcm_bytes = b""
+                wf.writeframes(pcm_bytes)
+
+            print(f"=== KET THUC THU MIC, luu file: {out_path}, so mau: {len(recorded_pcm)} ===")
+
+            # 2️⃣ GỬI TRẠNG THÁI PHẢN HỒI + EMOTION + LISTENING
+            await websocket.send_text("PROCESSING_START")
+            await websocket.send_text(random.choice(EMOTIONS))
+            await websocket.send_text("LISTENING")
+
+            # 3️⃣ PHÁT CÁC FILE WAV TRONG input/ (CHECK LOA)
+            for fname in os.listdir(INPUT_FOLDER):
+                if not fname.lower().endswith(".wav"):
+                    continue
+
+                path = os.path.join(INPUT_FOLDER, fname)
+                print(f"Playing {path}...")
+
+                try:
+                    with wave.open(path, "rb") as wf:
+                        sr = wf.getframerate()
+                        sw = wf.getsampwidth()
+                        ch = wf.getnchannels()
+
+                        if sr != 16000 or sw != 2 or ch != 1:
+                            print(f"Format error in {fname}: sr={sr}, sw={sw}, ch={ch}")
+                            continue
+
+                        pcm = wf.readframes(wf.getnframes())
+                        pcm_samples = list(struct.unpack("<{}h".format(len(pcm) // 2), pcm))
+
+                        encoder = ADPCMEncoder()
+                        adpcm_bytes = encoder.encode_block(pcm_samples)
+
+                        total = len(adpcm_bytes)
+                        sent = 0
+                        print(f"Sending {total} ADPCM bytes from {fname}")
+
+                        while sent < total:
+                            end = min(sent + CHUNK_BYTES, total)
+                            await websocket.send_bytes(adpcm_bytes[sent:end])
+                            sent = end
+
+                            # Gửi với tốc độ gần real-time để ESP không tràn buffer
+                            await asyncio.sleep(REAL_CHUNK_DELAY)
+
+                except Exception as e:
+                    print(f"Error playing {fname}: {e}")
+
+            # 4️⃣ BÁO KẾT THÚC TTS
+            await websocket.send_text("TTS_END")
+
+    except Exception as e:
+        print("Connection error:", e)
+        try:
+            await websocket.send_text("TTS_END")
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+        print("WebSocket closed")
+
+
+# ================= MAIN =================
+if __name__ == "__main__":
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=8000,
+        ws="websockets",
+        ws_ping_interval=30.0,
+        ws_ping_timeout=30.0,
+    )

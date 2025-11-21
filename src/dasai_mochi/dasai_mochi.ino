@@ -11,10 +11,10 @@
 
 // --- Cấu hình Mạng & WebSocket ---
 // MODIFIED: Changed to a mutable char array to hold the IP from WiFiManager
-char websocket_server_host[40] = "192.168.0.103"; // Default IP
+char websocket_server_host[40] = "13.239.36.114"; // Default IP 13.239.36.114
 const uint16_t websocket_server_port = 8000;
 const char *websocket_server_path = "/ws";
-#define TIMEOUT_MS 5000
+#define TIMEOUT_MS 20000
 
 // --- Chân cắm I2S (THEO SƠ ĐỒ MỚI ĐÃ SỬA LỖI) ---
 #define I2S_MIC_SERIAL_CLOCK 14
@@ -27,8 +27,7 @@ const char *websocket_server_path = "/ws";
 
 // --- Cài đặt I2S ---
 #define I2S_SAMPLE_RATE 16000
-#define I2S_MIC_BITS_PER_SAMPLE I2S_BITS_PER_SAMPLE_32BIT // Mic INMP441 cần 32-bit
-#define I2S_SPK_BITS_PER_SAMPLE I2S_BITS_PER_SAMPLE_16BIT // Speaker vẫn giữ 16-bit
+#define I2S_BITS_PER_SAMPLE I2S_BITS_PER_SAMPLE_16BIT
 #define I2S_MIC_PORT I2S_NUM_0
 #define I2S_SPEAKER_PORT I2S_NUM_1
 #define I2S_READ_CHUNK_SIZE 1024
@@ -45,6 +44,12 @@ const char *websocket_server_path = "/ws";
 #define SPEAKER_GAIN 0.5f
 #define PLAYBACK_BUFFER_SIZE 8192
 #define ANIMATION_FRAME_DELAY_MS 50
+
+#define MIC_RING_BUFFER_SIZE 65000  // ~0.5s dữ liệu ở 16kHz
+uint8_t mic_ring_buffer[MIC_RING_BUFFER_SIZE];
+volatile size_t mic_write_pos = 0;
+volatile size_t mic_read_pos = 0;
+
 
 // ===============================================================
 // 2. BIẾN TOÀN CỤC VÀ KHAI BÁO
@@ -63,7 +68,7 @@ enum State
   STATE_PLAYING_RESPONSE
 };
 volatile State currentState = STATE_FREE;
-int32_t i2s_read_buffer[I2S_READ_CHUNK_SIZE / 4];
+byte i2s_read_buffer[I2S_READ_CHUNK_SIZE];
 byte playback_buffer[PLAYBACK_BUFFER_SIZE];
 size_t playback_buffer_fill = 0;
 
@@ -169,7 +174,7 @@ void setup_i2s_input()
   i2s_config_t i2s_mic_config = {
       .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
       .sample_rate = I2S_SAMPLE_RATE,
-      .bits_per_sample = I2S_MIC_BITS_PER_SAMPLE,
+      .bits_per_sample = I2S_BITS_PER_SAMPLE,
       .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
@@ -191,7 +196,7 @@ void setup_i2s_output()
   i2s_config_t i2s_speaker_config = {
       .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
       .sample_rate = I2S_SAMPLE_RATE,
-      .bits_per_sample = I2S_SPK_BITS_PER_SAMPLE,
+      .bits_per_sample = I2S_BITS_PER_SAMPLE,
       .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
@@ -241,7 +246,7 @@ void onWebsocketMessage(WebsocketsMessage message)
   {
 
     String text_msg = String(message.c_str());
-    Serial.printf("Server sent text: %s\n", text_msg.c_str());
+     Serial.printf("[WS-TEXT] Received: %s\n", text_msg.c_str());
 
     if (text_msg == "PROCESSING_START")
     {
@@ -285,7 +290,7 @@ void onWebsocketMessage(WebsocketsMessage message)
       }
       else
       {
-        // Serial.println("Unknown emotion code received.");
+        //Serial.println("Unknown emotion code received.");
       }
     }
 
@@ -302,6 +307,7 @@ void onWebsocketMessage(WebsocketsMessage message)
     }
 
     size_t len = message.length();
+    Serial.printf("[WS-BIN] Received %d bytes audio from server\n", len);
     // ⚠️ Dùng c_str() để lấy dữ liệu nhị phân từ String
     const char *raw_data = message.c_str();
 
@@ -309,6 +315,7 @@ void onWebsocketMessage(WebsocketsMessage message)
     int16_t temp_write_buffer[len / sizeof(int16_t)];
     memcpy(temp_write_buffer, raw_data, len);
 
+    
     // Áp dụng gain nhưng giữ mức thấp để tránh clipping
     for (size_t i = 0; i < len / sizeof(int16_t); i++)
     {
@@ -345,46 +352,70 @@ void onWebsocketMessage(WebsocketsMessage message)
 
 void audio_processing_task(void *pvParameters)
 {
-  size_t bytes_read;
-  while (true)
-  {
-    // Only read and send audio when in streaming state
-    // Serial.println("Current State: " + String(currentState));
-    if (currentState == STATE_STREAMING)
-    {
-      // Read audio data from I2S microphone
-      i2s_read(I2S_MIC_PORT, i2s_read_buffer, sizeof(i2s_read_buffer), &bytes_read, portMAX_DELAY);
-
-      int samples = bytes_read / sizeof(int32_t);
-      int16_t pcm_buffer[samples];
-
-      for (int i = 0; i < samples; i++)
-      {
-        // INMP441: dữ liệu nằm ở 24 bit cao, dịch xuống để lấy đúng biên độ
-        pcm_buffer[i] = (int16_t)(i2s_read_buffer[i] >> 14);
+ size_t bytes_read;
+  while (true) {
+    if (currentState == STATE_STREAMING) {
+      i2s_read(I2S_MIC_PORT, i2s_read_buffer, I2S_READ_CHUNK_SIZE, &bytes_read, portMAX_DELAY);
+      if (bytes_read == I2S_READ_CHUNK_SIZE) {
+        for (size_t i = 0; i < bytes_read; i++) {
+          mic_ring_buffer[mic_write_pos++] = i2s_read_buffer[i];
+          if (mic_write_pos >= MIC_RING_BUFFER_SIZE) {
+            Serial.println(".");
+            mic_write_pos = 0;
+          } // vòng tròn
+        }
+        Serial.printf("[MIC] Wrote %d bytes to ring buffer. write_pos=%d, read_pos=%d\n", bytes_read, mic_write_pos, mic_read_pos);
       }
-      // Log: in ra 5 mẫu đầu tiên để kiểm tra
-      Serial.print("PCM[0..4]: ");
-      for (int i = 0; i < 5 && i < samples; i++)
-      {
-        Serial.print(pcm_buffer[i]);
-        Serial.print(" ");
-      }
-      Serial.println();
-      if (client.available())
-      {
-        client.sendBinary((const char *)pcm_buffer, samples * sizeof(int16_t));
-      }
-
-      // thông báo ra serial thông tin vừa thu âm
-      // Serial.println("Sent " + String(bytes_read) + " bytes of audio data to server.");
-    }
-    else
-    {
+    } else {
       vTaskDelay(pdMS_TO_TICKS(20));
     }
   }
 }
+
+void net_task(void *pvParameters) {
+  const size_t CHUNK_SIZE = 1024; // gửi nhỏ để giảm áp lực
+  while (true) {
+    if (currentState == STATE_STREAMING && client.available()) {
+      if (mic_read_pos != mic_write_pos) {
+        size_t available = (mic_write_pos >= mic_read_pos) ?
+                           (mic_write_pos - mic_read_pos) :
+                           (MIC_RING_BUFFER_SIZE - mic_read_pos);
+
+        size_t send_size = min(CHUNK_SIZE, available);
+        Serial.printf("[NET] Available=%d, send_size=%d, write_pos=%d, read_pos=%d\n", available, send_size, mic_write_pos, mic_read_pos);
+
+        // Nếu buffer gần đầy thì bỏ qua 2 chunk
+        size_t next_pos = (mic_write_pos + CHUNK_SIZE*2) % MIC_RING_BUFFER_SIZE;
+        if (next_pos == mic_read_pos) {
+          // clear 2 chunk để tránh tràn
+          mic_read_pos = (mic_read_pos + CHUNK_SIZE*2) % MIC_RING_BUFFER_SIZE;
+        }
+
+        // Lấy dữ liệu từ buffer
+        int16_t temp_buf[CHUNK_SIZE/2]; // 16-bit PCM
+        memcpy(temp_buf, &mic_ring_buffer[mic_read_pos], send_size);
+
+        // Nhân đôi biên độ tín hiệu
+        for (size_t i = 0; i < send_size/2; i++) {
+          int32_t amplified = temp_buf[i] * 3.0f;
+          if (amplified > 32767) amplified = 32767;
+          if (amplified < -32768) amplified = -32768;
+          temp_buf[i] = (int16_t)amplified;
+        }
+
+        // Gửi dữ liệu đã nhân đôi
+        bool ok = client.sendBinary((const char*)temp_buf, send_size);
+Serial.printf("[NET] Sent %d bytes to server, status=%d\n", send_size, ok);
+
+        // Cập nhật vị trí đọc
+        mic_read_pos = (mic_read_pos + send_size) % MIC_RING_BUFFER_SIZE;
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(10)); // nhịp gửi ~50 lần/giây
+  }
+}
+
+
 
 // ===============================================================
 // 5. SETUP & LOOP CHÍNH
@@ -459,6 +490,7 @@ void setup()
   client.connect(websocket_server_host, websocket_server_port, websocket_server_path);
 
   xTaskCreatePinnedToCore(audio_processing_task, "Audio Task", 4096, NULL, 10, NULL, 1);
+  xTaskCreatePinnedToCore(net_task, "Net Task", 4096, NULL, 9, NULL, 1);
   xTaskCreatePinnedToCore(display_task, "Display Task", 4096, NULL, 5, NULL, 0);
 
   Serial.println("==============================================");
@@ -501,7 +533,7 @@ void loop()
   // Check for timeout
   if (millis() - lastReceivedTime > TIMEOUT_MS)
   {
-    Serial.println("No message received for " + String(TIMEOUT_MS) + " ms. Setting emotion to STUNNED.");
+    Serial.printf("[TIMEOUT] No message for %d ms. CurrentState=%d, emotion=%d\n", TIMEOUT_MS, currentState, emotion);
     currentState = STATE_STREAMING;
     emotion = EMOTION_NEUTRAL;
     // ping server if not disconnect and re connect
