@@ -1,3 +1,17 @@
+/**************************************************************
+ *  File:        main.cpp
+ *  Project:     PTalkPTIT - ESP32 Voice Assistant Client
+ *  Author:      Nguyen Thanh Trung
+ *  Email:       trung.nt202717@gmail.com
+ *  Created:     2025-11-12
+ *  Last Update: 2025-11-22
+ *
+ *  Description:
+ *    - Kết nối WiFi bằng WiFiManager
+ *    - Kết nối WebSocket tới server (IP cấu hình được)
+ *    - Gửi/nhận audio dạng IMA ADPCM (I2S MIC/SPEAKER)
+ *    - Hiển thị animation cảm xúc trên TFT (Mochi UI)
+ **************************************************************/
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <ArduinoWebsockets.h>
