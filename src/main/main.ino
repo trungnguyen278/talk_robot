@@ -1,7 +1,7 @@
 /**************************************************************
  *  File:        main.cpp
  *  Project:     PTalkPTIT - ESP32 Voice Assistant Client
- *  Author:      Nguyen Thanh Trung
+ *  Author:      Trung Nguyen Thanh 
  *  Email:       trung.nt202717@gmail.com
  *  Created:     2025-11-12
  *  Last Update: 2025-11-22
@@ -132,11 +132,11 @@ AdpcmState adpcm_mic_state = {0, 0};
 AdpcmState adpcm_spk_state = {0, 0};
 
 // ================= IMA ADPCM (DVI4) IMPLEMENTATION =================
-
+// index table và step table
 static const int8_t indexTable[16] = {
     -1, -1, -1, -1, 2, 4, 6, 8,
     -1, -1, -1, -1, 2, 4, 6, 8};
-
+// step table
 static const int16_t stepTable[89] = {
     7, 8, 9, 10, 11, 12, 13, 14,
     16, 17, 19, 21, 23, 25, 28, 31,
@@ -150,7 +150,7 @@ static const int16_t stepTable[89] = {
     7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899,
     15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
     32767};
-
+// Hàm mã hóa PCM 16-bit sang IMA ADPCM
 int adpcm_encode_block(const int16_t *pcm_in, size_t num_samples,
                        uint8_t *adpcm_out, AdpcmState *st)
 {
@@ -256,7 +256,7 @@ int adpcm_encode_block(const int16_t *pcm_in, size_t num_samples,
 
   return (int)out_index; // số byte ADPCM sinh ra
 }
-
+// Hàm giải mã IMA ADPCM sang PCM 16-bit
 int adpcm_decode_block(const uint8_t *adpcm_in, size_t num_bytes,
                        int16_t *pcm_out, AdpcmState *st)
 {
@@ -322,7 +322,7 @@ int adpcm_decode_block(const uint8_t *adpcm_in, size_t num_bytes,
 
   return (int)out_samples; // số sample PCM sinh ra
 }
-
+// Hàm xóa ring buffer mic và spk
 void clearMicRingBuffer()
 {
 
@@ -331,7 +331,7 @@ void clearMicRingBuffer()
 
   Serial.println("[RING] Cleared mic ring buffer");
 }
-
+// Hàm xóa ring buffer spk
 void clearSpkRingBuffer()
 {
   spk_write_pos = 0;
@@ -494,12 +494,14 @@ void setup_i2s_output()
 
 // WebSocket Event Handlers
 void onWebsocketEvent(WebsocketsEvent event, String data)
-{
+{ 
+  // Handle different WebSocket events
   if (event == WebsocketsEvent::ConnectionOpened)
   {
     Serial.println("Websocket connection opened.");
     currentState = STATE_STREAMING;
   }
+  //  Handle connection closed event
   else if (event == WebsocketsEvent::ConnectionClosed)
   {
     Serial.println("Websocket connection closed.");
@@ -525,7 +527,7 @@ void onWebsocketMessage(WebsocketsMessage message)
 
     String text_msg = String(message.c_str());
     Serial.printf("[WS-TEXT] Received: %s\n", text_msg.c_str());
-
+    // Handle control messages from server
     if (text_msg == "PROCESSING_START")
     {
       Serial.println("Server is processing. Pausing mic.");
@@ -607,7 +609,7 @@ void onWebsocketMessage(WebsocketsMessage message)
   }
   lastReceivedTime = millis();
 }
-
+// Audio Processing Task: Read from I2S mic, encode to ADPCM, write to ring buffer
 void audio_processing_task(void *pvParameters)
 {
   size_t bytes_read;
