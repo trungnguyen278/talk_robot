@@ -535,6 +535,13 @@ void onWebsocketMessage(WebsocketsMessage message)
       emotion = EMOTION_NEUTRAL;
       clearMicRingBuffer();
       clearSpkRingBuffer();
+
+      adpcm_mic_state.predictor = 0;
+      adpcm_mic_state.index = 0;
+
+      adpcm_spk_state.predictor = 0;
+      adpcm_spk_state.index = 0;
+
     }
     else if (text_msg == "TTS_END")
     {
@@ -547,6 +554,11 @@ void onWebsocketMessage(WebsocketsMessage message)
         i2s_write(I2S_SPEAKER_PORT, playback_buffer, playback_buffer_fill, &bytes_written, portMAX_DELAY);
         playback_buffer_fill = 0;
       }
+      clearMicRingBuffer();
+
+      adpcm_mic_state.predictor = 0;
+      adpcm_mic_state.index = 0;
+
       currentState = STATE_STREAMING;
       emotion = EMOTION_NEUTRAL;
     }
@@ -810,6 +822,12 @@ void loop()
       currentState = STATE_OFFLINE_WIFI;
       clearMicRingBuffer();
       clearSpkRingBuffer();
+
+      adpcm_mic_state.predictor = 0;
+      adpcm_mic_state.index = 0;
+      adpcm_spk_state.predictor = 0;
+      adpcm_spk_state.index = 0;
+
     }
 
     tft.fillScreen(TFT_BLACK);
@@ -828,6 +846,11 @@ void loop()
       currentState = STATE_DISCONNECTED_WS;
       clearMicRingBuffer();
       clearSpkRingBuffer();
+      adpcm_mic_state.predictor = 0;
+      adpcm_mic_state.index = 0;
+      adpcm_spk_state.predictor = 0;
+      adpcm_spk_state.index = 0;
+
     }
 
     static unsigned long lastReconnectTry = 0;
