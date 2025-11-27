@@ -169,7 +169,7 @@ int adpcm_encode_block(const int16_t *pcm_in, size_t num_samples,
   for (size_t i = 0; i < num_samples; ++i)
   {
     int sample = pcm_in[i];
-    sample = sample * 3.0f; // tăng gain đầu vào
+    sample = sample * 1.0f; // tăng gain đầu vào
 
     // Clamp để tránh overflow int16 range
     if (sample > 32767)
@@ -535,13 +535,6 @@ void onWebsocketMessage(WebsocketsMessage message)
       emotion = EMOTION_NEUTRAL;
       clearMicRingBuffer();
       clearSpkRingBuffer();
-
-      adpcm_mic_state.predictor = 0;
-      adpcm_mic_state.index = 0;
-
-      adpcm_spk_state.predictor = 0;
-      adpcm_spk_state.index = 0;
-
     }
     else if (text_msg == "TTS_END")
     {
@@ -554,13 +547,13 @@ void onWebsocketMessage(WebsocketsMessage message)
         i2s_write(I2S_SPEAKER_PORT, playback_buffer, playback_buffer_fill, &bytes_written, portMAX_DELAY);
         playback_buffer_fill = 0;
       }
-      clearMicRingBuffer();
-
       adpcm_mic_state.predictor = 0;
       adpcm_mic_state.index = 0;
 
       currentState = STATE_STREAMING;
       emotion = EMOTION_NEUTRAL;
+
+
     }
     else if (text_msg == "LISTENING")
     {
@@ -723,7 +716,7 @@ void setup()
   pinMode(27, OUTPUT);
   digitalWrite(27, HIGH);
   tft.begin();
-  tft.setRotation(1);
+  tft.setRotation(2);
   tft.invertDisplay(true);
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE);
@@ -798,7 +791,7 @@ void setup()
 
   // --- Create Tasks ---
 
-  xTaskCreatePinnedToCore(audio_processing_task, "Audio Task", 8192, NULL, 10, NULL, 1);
+  xTaskCreatePinnedToCore(audio_processing_task, "Audio Task", 8192, NULL, 4, NULL, 1);
 
   xTaskCreatePinnedToCore(display_task, "Display Task", 4096, NULL, 5, NULL, 0);
 
@@ -822,12 +815,6 @@ void loop()
       currentState = STATE_OFFLINE_WIFI;
       clearMicRingBuffer();
       clearSpkRingBuffer();
-
-      adpcm_mic_state.predictor = 0;
-      adpcm_mic_state.index = 0;
-      adpcm_spk_state.predictor = 0;
-      adpcm_spk_state.index = 0;
-
     }
 
     tft.fillScreen(TFT_BLACK);
@@ -846,11 +833,6 @@ void loop()
       currentState = STATE_DISCONNECTED_WS;
       clearMicRingBuffer();
       clearSpkRingBuffer();
-      adpcm_mic_state.predictor = 0;
-      adpcm_mic_state.index = 0;
-      adpcm_spk_state.predictor = 0;
-      adpcm_spk_state.index = 0;
-
     }
 
     static unsigned long lastReconnectTry = 0;
