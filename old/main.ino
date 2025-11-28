@@ -1,7 +1,7 @@
 /**************************************************************
  *  File:        main.cpp
  *  Project:     PTalkPTIT - ESP32 Voice Assistant Client
- *  Author:      Trung Nguyen Thanh
+ *  Author:      Trung Nguyen Thanh 
  *  Email:       trung.nt202717@gmail.com
  *  Created:     2025-11-12
  *  Last Update: 2025-11-22
@@ -59,14 +59,13 @@ const char *websocket_server_path = "/ws";
 #define PLAYBACK_BUFFER_SIZE 8192
 #define ANIMATION_FRAME_DELAY_MS 50
 
-#define MIC_RING_BUFFER_SIZE 32768 // 2s dữ liệu ADPCM
-// ==== MIC RING BUFFER ====
+#define MIC_RING_BUFFER_SIZE 32768 // ~0.5s dữ liệu ở 16kHz
 uint8_t mic_ring_buffer[MIC_RING_BUFFER_SIZE];
 volatile size_t mic_write_pos = 0;
 volatile size_t mic_read_pos = 0;
 // ==== ADPCM & SPEAKER RING BUFFER ====
 // buffer nhận từ server (dạng ADPCM)
-#define SPK_RING_BUFFER_SIZE 4096 // kích thước tuỳ chỉnh
+#define SPK_RING_BUFFER_SIZE 16384
 uint8_t spk_ring_buffer[SPK_RING_BUFFER_SIZE];
 volatile size_t spk_write_pos = 0;
 volatile size_t spk_read_pos = 0;
@@ -116,6 +115,7 @@ extern VideoInfo *animationList[];
 // Declare thinkingEmotion as extern
 extern VideoInfo *thinkingEmotion;
 
+
 // emotion variable to track current emotion state
 volatile uint8_t emotion = EMOTION_NEUTRAL;
 
@@ -130,32 +130,6 @@ typedef struct
 
 AdpcmState adpcm_mic_state = {0, 0};
 AdpcmState adpcm_spk_state = {0, 0};
-
-// ================= SIMPLE ENERGY-BASED VAD =================
-#define VAD_ENERGY_THRESHOLD 100.0f // Ngưỡng năng lượng (tuỳ môi trường mà chỉnh)
-#define VAD_HANGOVER_FRAMES 200       // Số frame giữ “nói tiếp” sau khi rơi dưới ngưỡng (~8*32ms ≈ 256ms)
-
-volatile bool vad_in_speech = false;
-int vad_hangover_count = 0;
-
-bool vad_is_speech(const int16_t *pcm, size_t num_samples)
-{
-  if (num_samples == 0)
-    return false;
-
-  uint64_t sum_abs = 0;
-  for (size_t i = 0; i < num_samples; ++i)
-  {
-    int16_t s = pcm[i];
-    sum_abs += (uint16_t)abs(s);
-  }
-
-  float avg = (float)sum_abs / (float)num_samples;
-  // Debug nếu muốn xem mức năng lượng:
-  // Serial.printf("[VAD] avg=%.1f\n", avg);
-
-  return avg > VAD_ENERGY_THRESHOLD;
-}
 
 // ================= IMA ADPCM (DVI4) IMPLEMENTATION =================
 // index table và step table
@@ -355,10 +329,6 @@ void clearMicRingBuffer()
   mic_write_pos = 0;
   mic_read_pos = 0;
 
-  // Reset VAD state luôn cho sạch
-  vad_in_speech = false;
-  vad_hangover_count = 0;
-
   Serial.println("[RING] Cleared mic ring buffer");
 }
 // Hàm xóa ring buffer spk
@@ -524,19 +494,12 @@ void setup_i2s_output()
 
 // WebSocket Event Handlers
 void onWebsocketEvent(WebsocketsEvent event, String data)
-{
+{ 
   // Handle different WebSocket events
   if (event == WebsocketsEvent::ConnectionOpened)
   {
     Serial.println("Websocket connection opened.");
     currentState = STATE_STREAMING;
-    //send id device
-    uint64_t chipid = ESP.getEfuseMac();
-    String device_id = String((uint32_t)(chipid >> 32), HEX) +
-                      String((uint32_t)chipid, HEX);
-    client.send(device_id);
-
-
   }
   //  Handle connection closed event
   else if (event == WebsocketsEvent::ConnectionClosed)
@@ -558,7 +521,7 @@ void onWebsocketEvent(WebsocketsEvent event, String data)
 void onWebsocketMessage(WebsocketsMessage message)
 {
   // --- Handling Text Messages ---
-
+  
   if (message.isText())
   {
 
@@ -589,6 +552,8 @@ void onWebsocketMessage(WebsocketsMessage message)
 
       currentState = STATE_STREAMING;
       emotion = EMOTION_NEUTRAL;
+
+
     }
     else if (text_msg == "LISTENING")
     {
@@ -673,37 +638,6 @@ void audio_processing_task(void *pvParameters)
         int16_t *pcm = (int16_t *)i2s_read_buffer;
         size_t num_samples = bytes_read / sizeof(int16_t);
 
-        // ====== VAD: kiểm tra frame có tiếng nói hay không ======
-        bool speech = vad_is_speech(pcm, num_samples);
-
-        if (speech)
-        {
-          vad_in_speech = true;
-          vad_hangover_count = VAD_HANGOVER_FRAMES;
-        }
-        else
-        {
-          if (vad_hangover_count > 0)
-          {
-            // Giữ thêm vài frame sau khi rơi xuống dưới ngưỡng
-            speech = true;
-            vad_hangover_count--;
-          }
-          else
-          {
-            vad_in_speech = false;
-          }
-        }
-
-        if (!speech)
-        {
-          // Frame được coi là im lặng -> bỏ qua, không encode, không đẩy vào ring
-          // Serial.println("[VAD] Silence frame skipped");
-          // quay lại vòng while, đọc frame tiếp theo
-          continue;
-        }
-        // ====== HẾT VAD ======
-
         // ADPCM 4:1 → cần khoảng num_samples / 2 bytes
         uint8_t adpcm_buf[I2S_READ_CHUNK_SIZE / 4];
 
@@ -782,7 +716,7 @@ void setup()
   pinMode(27, OUTPUT);
   digitalWrite(27, HIGH);
   tft.begin();
-  tft.setRotation(1);
+  tft.setRotation(2);
   tft.invertDisplay(true);
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE);
@@ -968,6 +902,7 @@ void loop()
       }
     }
   }
+
 
   delay(10);
 }
